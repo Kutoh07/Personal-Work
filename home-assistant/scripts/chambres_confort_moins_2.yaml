@@ -1,48 +1,66 @@
-# Script Home Assistant : passe les NodOn fil pilote (ZHA) des chambres
-# Pink room, Brown room et White room en mode "Confort -2".
+# Script Home Assistant : force les NodOn fil pilote (ZHA) des chambres
+# Pink room, Brown room et White room en "Confort -2".
+# Pour chaque chambre : si le NodOn est éteint (off), il est allumé (on),
+# puis passé en Confort -2. Pas de durée : les automatisations de
+# désactivation existantes reprennent la main ensuite.
 #
 # Installation : Paramètres > Automatisations et scènes > Scripts > Créer un script
-#   > menu ⋮ > Modifier en YAML > coller ce contenu (sans la première clé
-#   "chambres_confort_moins_2:" si tu passes par l'éditeur graphique).
+#   > menu ⋮ > Modifier en YAML > coller le contenu SOUS la clé
+#   "chambres_confort_moins_2:" (sans cette première ligne).
 #   Ou : coller tel quel dans scripts.yaml puis recharger les scripts.
 #
-# À ADAPTER : les 3 entity_id ci-dessous. Pour les trouver :
-#   Outils de développement > États > filtrer sur "select." + nom du NodOn.
-#   (Entité "Pilot wire mode" / "Mode fil pilote" du module NodOn.)
+# À ADAPTER : les 6 entity_id (switch = marche/arrêt, select = mode fil pilote).
+#   Outils de développement > États > filtrer sur le nom du NodOn.
 
 chambres_confort_moins_2:
   alias: "Chambres en Confort -2"
-  description: "Passe les NodOn de Pink room, Brown room et White room en Confort -2."
+  description: "Allume si besoin les NodOn de Pink, Brown et White room puis les passe en Confort -2."
   icon: mdi:radiator
   mode: single
   sequence:
     - repeat:
         for_each:
-          - select.nodon_pink_room_pilot_wire_mode    # À ADAPTER
-          - select.nodon_brown_room_pilot_wire_mode   # À ADAPTER
-          - select.nodon_white_room_pilot_wire_mode   # À ADAPTER
+          - name: Pink room
+            switch: switch.nodon_pink_room            # À ADAPTER
+            mode: select.nodon_pink_room_pilot_wire_mode   # À ADAPTER
+          - name: Brown room
+            switch: switch.nodon_brown_room           # À ADAPTER
+            mode: select.nodon_brown_room_pilot_wire_mode  # À ADAPTER
+          - name: White room
+            switch: switch.nodon_white_room           # À ADAPTER
+            mode: select.nodon_white_room_pilot_wire_mode  # À ADAPTER
         sequence:
-          # L'option exacte est cherchée dans la liste exposée par ZHA
-          # (ex. "Comfort -2", "comfort_minus_2"...) : pas besoin de connaître
-          # son libellé exact.
-          - variables:
-              option_cible: >-
-                {{ (state_attr(repeat.item, 'options') or [])
-                   | select('search', '(?i)(minus[ _-]?2|-\s?2)')
-                   | first | default('') }}
+          # 1. Allumer le NodOn s'il n'est pas déjà sur "on"
           - if:
               - condition: template
-                value_template: "{{ option_cible != '' }}"
+                value_template: "{{ not is_state(repeat.item.switch, 'on') }}"
+            then:
+              - action: switch.turn_on
+                target:
+                  entity_id: "{{ repeat.item.switch }}"
+              - wait_template: "{{ is_state(repeat.item.switch, 'on') }}"
+                timeout: "00:00:10"
+                continue_on_timeout: true
+          # 2. Trouver l'option "Confort -2" exposée par ZHA (libellé variable)
+          - variables:
+              option_cible: >-
+                {{ (state_attr(repeat.item.mode, 'options') or [])
+                   | select('search', '(?i)(minus[ _-]?2|-\s?2)')
+                   | first | default('') }}
+          # 3. Appliquer le mode, ou notifier en cas d'échec
+          - if:
+              - condition: template
+                value_template: "{{ is_state(repeat.item.switch, 'on') and option_cible != '' }}"
             then:
               - action: select.select_option
                 target:
-                  entity_id: "{{ repeat.item }}"
+                  entity_id: "{{ repeat.item.mode }}"
                 data:
                   option: "{{ option_cible }}"
             else:
               - action: persistent_notification.create
                 data:
-                  title: "Confort -2 : échec"
+                  title: "Confort -2 : échec {{ repeat.item.name }}"
                   message: >-
-                    Option Confort -2 introuvable pour {{ repeat.item }}.
-                    Options disponibles : {{ state_attr(repeat.item, 'options') }}
+                    Interrupteur {{ repeat.item.switch }} : {{ states(repeat.item.switch) }}.
+                    Options de {{ repeat.item.mode }} : {{ state_attr(repeat.item.mode, 'options') }}
