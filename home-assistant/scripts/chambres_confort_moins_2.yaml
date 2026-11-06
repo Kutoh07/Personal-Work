@@ -1,0 +1,48 @@
+# Script Home Assistant : passe les NodOn fil pilote (ZHA) des chambres
+# Pink room, Brown room et White room en mode "Confort -2".
+#
+# Installation : Paramètres > Automatisations et scènes > Scripts > Créer un script
+#   > menu ⋮ > Modifier en YAML > coller ce contenu (sans la première clé
+#   "chambres_confort_moins_2:" si tu passes par l'éditeur graphique).
+#   Ou : coller tel quel dans scripts.yaml puis recharger les scripts.
+#
+# À ADAPTER : les 3 entity_id ci-dessous. Pour les trouver :
+#   Outils de développement > États > filtrer sur "select." + nom du NodOn.
+#   (Entité "Pilot wire mode" / "Mode fil pilote" du module NodOn.)
+
+chambres_confort_moins_2:
+  alias: "Chambres en Confort -2"
+  description: "Passe les NodOn de Pink room, Brown room et White room en Confort -2."
+  icon: mdi:radiator
+  mode: single
+  sequence:
+    - repeat:
+        for_each:
+          - select.nodon_pink_room_pilot_wire_mode    # À ADAPTER
+          - select.nodon_brown_room_pilot_wire_mode   # À ADAPTER
+          - select.nodon_white_room_pilot_wire_mode   # À ADAPTER
+        sequence:
+          # L'option exacte est cherchée dans la liste exposée par ZHA
+          # (ex. "Comfort -2", "comfort_minus_2"...) : pas besoin de connaître
+          # son libellé exact.
+          - variables:
+              option_cible: >-
+                {{ (state_attr(repeat.item, 'options') or [])
+                   | select('search', '(?i)(minus[ _-]?2|-\s?2)')
+                   | first | default('') }}
+          - if:
+              - condition: template
+                value_template: "{{ option_cible != '' }}"
+            then:
+              - action: select.select_option
+                target:
+                  entity_id: "{{ repeat.item }}"
+                data:
+                  option: "{{ option_cible }}"
+            else:
+              - action: persistent_notification.create
+                data:
+                  title: "Confort -2 : échec"
+                  message: >-
+                    Option Confort -2 introuvable pour {{ repeat.item }}.
+                    Options disponibles : {{ state_attr(repeat.item, 'options') }}
